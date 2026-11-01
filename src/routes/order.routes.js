@@ -16,22 +16,34 @@ router.post("/", authRequired, async (req, res, next) => {
       });
     }
 
+    const productIds = new Set();
     for (const item of items) {
       if (
-        !Number.isInteger(Number(item.pid)) ||
-        !Number.isInteger(Number(item.qty)) ||
+        !item ||
+        !Number.isSafeInteger(Number(item.pid)) ||
+        Number(item.pid) <= 0 ||
+        Number(item.pid) > 2147483647 ||
+        !Number.isSafeInteger(Number(item.qty)) ||
+        Number(item.qty) > 2147483647 ||
         Number(item.qty) <= 0
       ) {
         return res.status(400).json({
           message: "Invalid order item"
         });
       }
+      const pid = Number(item.pid);
+      if (productIds.has(pid)) {
+        return res.status(400).json({ message: "Duplicate product id" });
+      }
+      productIds.add(pid);
     }
 
+    // Lock products in a consistent order to avoid deadlocks between orders.
+    const sortedItems = [...items].sort((a, b) => Number(a.pid) - Number(b.pid));
     const result = await prisma.$transaction(async (tx) => {
       const preparedItems = [];
 
-      for (const item of items) {
+      for (const item of sortedItems) {
         const pid = Number(item.pid);
         const qty = Number(item.qty);
 
@@ -45,7 +57,12 @@ router.post("/", authRequired, async (req, res, next) => {
           throw error;
         }
 
-        if (product.quantity < qty) {
+        // PostgreSQL checks the condition again after waiting for a concurrent update.
+        const reserved = await tx.product.updateMany({
+          where: { pid, quantity: { gte: qty } },
+          data: { quantity: { decrement: qty } }
+        });
+        if (reserved.count !== 1) {
           const error = new Error(
             `Insufficient stock for product ${product.pname}`
           );
@@ -72,17 +89,6 @@ router.post("/", authRequired, async (req, res, next) => {
             pid: item.product.pid,
             qty: item.qty,
             unit_price: item.product.price
-          }
-        });
-
-        await tx.product.update({
-          where: {
-            pid: item.product.pid
-          },
-          data: {
-            quantity: {
-              decrement: item.qty
-            }
           }
         });
       }
