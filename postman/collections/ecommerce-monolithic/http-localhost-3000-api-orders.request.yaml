@@ -1,0 +1,23 @@
+$kind: http-request
+name: http://localhost:3000/api/orders
+description: ""
+url: http://localhost:3000/api/orders
+method: POST
+body:
+  type: json
+  content: "{\r
+
+    \    \"items\" : [\r
+
+    \        {\"pid\" : 55, \"qty\" : 2},\r
+
+    \        {\"pid\" : 56, \"qty\" : 5}\r
+
+    \    ]\r
+
+    }"
+auth:
+  type: bearer
+  credentials:
+    token: "{{json_web_token_166g}}"
+order: 3000
